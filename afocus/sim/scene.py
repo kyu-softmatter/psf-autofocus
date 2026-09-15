@@ -46,6 +46,18 @@ class RandomisationConfig:
 
     # --- optics ---
     systems: Tuple[str, ...] = ("20x_air", "40x_water", "60x_oil")
+    #: A specific instrument to model instead of sampling the presets.  Set this
+    #: from a YAML file via :func:`afocus.optics.config.load_system` when the
+    #: dataset is meant for one microscope.
+    custom_system: Optional[ImagingSystem] = None
+    #: With ``custom_system`` set, whether to hold its optics fixed.  Jittering
+    #: NA, wavelength and the refractive indices is right when training a model
+    #: that must work on *any* microscope; it is wrong when the instrument is
+    #: known, because it widens the distribution the model has to cover for no
+    #: benefit.  Aberrations, photon budget, illumination field and stage error
+    #: stay randomised either way -- those genuinely vary day to day on one
+    #: instrument.
+    lock_optics: bool = True
     na_jitter: Tuple[float, float] = (0.97, 1.0)        # multiplies nominal NA
     wavelength: Tuple[float, float] = (0.46, 0.68)
     aberration_scale: Tuple[float, float] = (0.0, 2.0)  # multiplies RANDOMISATION_SIGMA
@@ -135,8 +147,27 @@ def illumination_field(shape: Tuple[int, int], rng: np.random.Generator,
 def draw_system(rng: np.random.Generator, cfg: RandomisationConfig,
                 system_name: Optional[str] = None) -> Tuple[ImagingSystem, Dict[str, float]]:
     """Draw a jittered optical system plus its aberration state."""
-    name = system_name or str(rng.choice(cfg.systems))
-    base = preset(name)
+    if cfg.custom_system is not None:
+        base = cfg.custom_system
+        name = base.name
+    else:
+        name = system_name or str(rng.choice(cfg.systems))
+        base = preset(name)
+
+    if cfg.custom_system is not None and cfg.lock_optics:
+        # Keep the instrument exactly as specified, but still vary what varies
+        # on a real instrument from session to session.
+        ill = Illumination(
+            wavelength=base.illumination.wavelength,
+            bandwidth=base.illumination.bandwidth,
+            n_spectral=base.illumination.n_spectral,
+            exposure=base.illumination.exposure,
+            photons_per_emitter=_loguniform(rng, cfg.photons_per_emitter),
+            background=_loguniform(rng, cfg.background),
+        )
+        sysm = ImagingSystem(objective=base.objective, camera=base.camera,
+                             stack=base.stack, illumination=ill, name=name)
+        return sysm, Z.random_named(rng, scale=_u(rng, cfg.aberration_scale))
 
     na = base.objective.na * _u(rng, cfg.na_jitter)
     obj = Objective(na=na, magnification=base.objective.magnification,
@@ -146,8 +177,9 @@ def draw_system(rng: np.random.Generator, cfg: RandomisationConfig,
 
     n_imm = base.stack.n_immersion + (
         _u(rng, cfg.immersion_index_error) if base.objective.n_immersion > 1.05 else 0.0)
+    n_sample = _u(rng, cfg.n_sample)
     stack = SampleStack(
-        n_sample=_u(rng, cfg.n_sample),
+        n_sample=n_sample,
         n_glass=base.stack.n_glass,
         n_immersion=n_imm,
         n_glass_design=base.stack.n_glass_design,

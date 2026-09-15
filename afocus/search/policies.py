@@ -172,12 +172,14 @@ class HillClimb:
         trace = [(z, s_here)]
         direction = 1.0
         hit_limit = False
+        reversals = 0
         while cam.n_frames < cap and step >= self.min_step:
             z_try = z + direction * step
             if abs(z_try - z0) > self.travel:
                 hit_limit = True
                 direction = -direction
                 step *= 0.5
+                reversals += 1
                 continue
             s_try = M.focus_score(cam.grab(z_try), self.metric)
             trace.append((z_try, s_try))
@@ -186,18 +188,26 @@ class HillClimb:
             else:
                 direction = -direction
                 step *= 0.5
+                reversals += 1
 
-        # A satisfied step criterion only proves the steps got small.  Require
-        # the endpoint to beat its neighbours before calling it converged, and
-        # report the distance travelled so a runaway climb is visible.
+        # A satisfied step criterion only proves the steps got small, and a
+        # local maximum only proves the neighbours are lower.  Neither rules out
+        # having settled on a noise-driven maximum far from focus: measured on a
+        # rendered scene the climb landed 8 DoF out having reversed once, with
+        # both of those conditions met.  So also require the peak to have been
+        # bracketed from both sides -- at least two reversals -- and report
+        # everything a caller needs to disbelieve the answer.
         near = [(zz, ss) for zz, ss in trace if abs(zz - z) <= 2.0 * self.step]
         is_local_max = all(ss <= s_here + 1e-12 for _, ss in near)
         travelled = abs(z - z0)
+        bracketed = reversals >= 2
         return FocusResult(
             float(z), cam.n_frames, trace,
-            converged=bool(step < self.min_step and is_local_max and not hit_limit),
+            converged=bool(step < self.min_step and is_local_max
+                           and bracketed and not hit_limit),
             info={"final_step": step, "travelled_um": travelled,
                   "hit_travel_limit": hit_limit, "local_max": is_local_max,
+                  "reversals": reversals, "bracketed": bracketed,
                   "runaway": travelled > 0.8 * self.travel},
         )
 

@@ -1,0 +1,102 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The physics does not need torch, and this job is what actually guards it.
+  # Keeping it torch-free means it finishes in well under a minute and runs on
+  # several Python versions, where the full job runs once.
+  physics:
+    name: physics (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install without torch
+        run: |
+          python -m pip install --upgrade pip
+          pip install "numpy>=1.24" "scipy>=1.10" "scikit-image>=0.20" \
+                      "matplotlib>=3.6" "pytest>=7.4"
+      - name: Byte-compile everything
+        run: python -m compileall -q afocus scripts
+      - name: Run the suite
+        # tests/test_models.py skips itself without torch (importorskip)
+        run: python -m pytest -q
+
+  models:
+    name: models (torch, cpu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install with CPU-only torch
+        # The default index serves CUDA wheels, roughly 2 GB that this job has
+        # no use for.
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt
+      - name: Run the suite
+        run: python -m pytest -q
+
+  smoke:
+    name: end-to-end smoke
+    runs-on: ubuntu-latest
+    needs: models
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt
+      # Unit tests exercise the modules; only this catches the CLIs drifting
+      # away from the library underneath them.
+      # 64 px, not 32: below about this size no frame has a resolvable boundary
+      # or a detectable spot, so the edge and hybrid models are left with an
+      # empty training split.
+      - name: Generate a tiny dataset
+        run: |
+          python scripts/make_dataset.py --out /tmp/ds --scenes 12 --fov 64 \
+            --planes 7 --workers 2 --shard-size 4 --fft-threads 1
+      - name: Train one epoch of each model kind
+        run: |
+          for kind in image edge hybrid; do
+            python scripts/train.py --data /tmp/ds --kind $kind --epochs 1 \
+              --batch-size 8 --image-size 64 --no-pretrained --all-frames \
+              --out /tmp/run_$kind
+          done
+      - name: Compare policies against an oracle estimator
+        run: python scripts/evaluate.py --scenes 3 --fov 64 --oracle 0.5 --out /tmp/policies.json
+      - name: Check the artefacts exist
+        run: |
+          test -f /tmp/ds/manifest.json
+          test -f /tmp/run_image/result.json
+          test -f /tmp/policies.json
+          python -c "import json,sys; r=json.load(open('/tmp/run_image/result.json')); \
+            assert r['n_train'] > 0, r; print('train records:', r['n_train'])"

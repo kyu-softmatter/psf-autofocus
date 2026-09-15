@@ -5,6 +5,7 @@ microscope autofocus.** Vectorial (Richards–Wolf) PSF simulation, 14 sample
 geometries, a full sCMOS/EMCCD sensor model, geometry-invariant focus features,
 and the classical z-scan baselines the learned model has to beat.
 
+[![ci](https://github.com/kyu-softmatter/psf-autofocus/actions/workflows/ci.yml/badge.svg)](https://github.com/kyu-softmatter/psf-autofocus/actions/workflows/ci.yml)
 ![status](https://img.shields.io/badge/status-simulation%20validated%2C%20training%20pending-yellow)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -366,11 +367,79 @@ entries; peak RSS per worker settled around 600 MB.
 The lesson worth keeping: *profile before optimising*, and treat a timing
 measurement taken while another job shares the cores as no measurement at all.
 
-## 12. Usage
+## 12. Tests
+
+141 tests, 20 seconds, no GPU. They exist because the bugs this code had were
+exactly the kind a test catches, and writing them caught two more:
+
+- `dct_entropy` had an **inverted sign** and peaked at the edge of every scan.
+  `test_reliable_metrics_peak_at_focus` is one assertion and would have caught
+  it the day it was written.
+- The focal-shift model **omitted the constant coverglass term**, putting best
+  focus 6.5 µm from the truth. `test_focal_shift_includes_the_coverglass_term`
+  pins it.
+- Writing the suite then found that `FocalShift` **short-circuited the
+  index-matched case to a zero shift**. Matched indices remove the depth-induced
+  *aberration*, not the focal shift: with n_sample = n_immersion best focus sits
+  at exactly −depth, because the emitter has moved. This never bit the
+  randomised dataset (indices are never exactly equal) but would have bitten
+  the first lab instrument configured as matched.
+- And that `DefocusBins.soft_target` **silently produced an all-zero target**
+  for any label outside the bin range: every Gaussian weight underflowed, so the
+  frame contributed nothing to the loss — dropped by the binning rather than by
+  the validity mask, and invisible either way. Targets are now clamped to the
+  edge bin.
+
+```bash
+pip install -r requirements-dev.txt
+python3 -m pytest                       # everything
+python3 -m pytest tests/test_psf.py -v  # one module
+```
+
+CI runs three jobs on every push: the physics suite on Python 3.10 and 3.12
+*without* torch (so it finishes in under a minute), the full suite with CPU-only
+torch, and an end-to-end smoke job that generates a tiny dataset, trains one
+epoch of each model kind and runs the policy comparison — because unit tests
+exercise the modules but only that catches the CLIs drifting away from the
+library underneath them.
+
+## 13. Pointing it at a real instrument
+
+The presets are common objectives, but no microscope is exactly one of them, and
+the differences move best focus by micrometres. Copy
+[`configs/lab_template.yaml`](configs/lab_template.yaml), fill in the numbers,
+and check what they imply *before* generating anything:
+
+```bash
+python3 scripts/show_system.py configs/mylab.yaml
+```
+
+That prints the sampling ratio, the wrap-free defocus range, the focal-shift
+offset and slope, and — most useful — the sample thickness beyond which focus
+stops being well defined on that instrument. For the template system that limit
+is 0.84 µm; generating with the default 8 µm slabs sent 50% of scenes to the
+label gates as ambiguous, and following the printed suggestion took the usable
+fraction from 50% to 70%.
+
+```bash
+python3 scripts/make_dataset.py --out data/mylab --scenes 1000     --system-config configs/mylab.yaml --slab-thickness 0.1 0.84 --workers 6
+```
+
+With `--system-config` the optics are held exactly as specified while
+aberrations, photon budget, illumination field and stage error stay randomised —
+those genuinely vary session to session on one instrument. Pass
+`--jitter-optics` to also vary NA, wavelength and the indices, which is right
+when training a model that must work on *any* microscope and wrong when the
+instrument is known.
+
+## 14. Usage
 
 ```bash
 # geometry gallery and focus-curve comparison
 python scripts/demo_geometry.py --system 20x_air --fov 128
+
+# inspect an instrument before committing compute to it
+python scripts/show_system.py --preset 60x_oil
 
 # dataset (parallel over scenes; keep --fft-threads 1 when --workers > 1)
 python scripts/make_dataset.py --out data/train --scenes 1200 --workers 9
@@ -388,7 +457,7 @@ python scripts/evaluate.py --scenes 40 --oracle 0.5              # policy check
 python scripts/evaluate.py --scenes 40 --checkpoint runs/image/best.pt
 ```
 
-## 13. Honest limits
+## 15. Honest limits
 
 - **Sim-to-real is unvalidated.** No real microscope data has been through this.
   Domain randomisation (aberrations, index mismatch, coverglass error,

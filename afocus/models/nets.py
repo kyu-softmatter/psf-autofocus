@@ -107,9 +107,19 @@ class DefocusBins:
         ``sigma`` is in DoF.  Smoothing is what makes this behave like ordinal
         regression rather than unordered classification: a prediction one bin
         away is penalised far less than one at the wrong sign.
+
+        Targets are clamped into the bin range first.  Without the clamp, a
+        target far outside the range makes every ``exp(-d^2/2)`` underflow to
+        exactly zero, the normalisation divides zero by its floor, and the row
+        becomes an all-zero "distribution" that contributes *nothing* to the
+        loss.  Such a frame would then be silently dropped from training by the
+        binning rather than by the validity mask -- invisible, and impossible to
+        account for.  Clamping instead supervises it towards the edge bin, which
+        is the honest statement: at least this far out, direction known.
         """
         c = self.centres.to(dz.device)
-        d = (dz[:, None] - c[None, :]) / max(sigma, 1e-6)
+        clamped = dz.clamp(-self.span, self.span)
+        d = (clamped[:, None] - c[None, :]) / max(sigma, 1e-6)
         t = torch.exp(-0.5 * d ** 2)
         return t / t.sum(dim=1, keepdim=True).clamp_min(1e-12)
 

@@ -10,5 +10,8 @@ torchvision>=0.15    # ResNet backbones for the image branch
 # Boundary detection for the edge-profile features
 scikit-image>=0.20   # skimage.measure.find_contours
 
+# Instrument configuration files
+pyyaml>=6.0
+
 # Figures
 matplotlib>=3.6

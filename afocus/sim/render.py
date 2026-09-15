@@ -75,14 +75,18 @@ class FocalShift:
         self.engine = engine
         self.mode = mode
         st = engine.system.stack
-        index_matched = abs(st.n_sample - st.n_immersion) < 1e-9
 
         self.offset = 0.0
-        if index_matched and st.matched():
-            self.depths = np.array([0.0, max(depth_max, 1e-3)])
-            self.shifts = np.zeros(2)
-            self.slope = 0.0
-        elif mode == "analytic":
+        # No short-circuit for the index-matched case.  An earlier version
+        # returned a zero shift whenever n_sample == n_immersion, reasoning that
+        # a matched stack induces no aberration.  It induces no *aberration*,
+        # but it certainly induces a focal *shift*: with n_s = n_i the depth and
+        # defocus terms are the same function of pupil angle, so best focus sits
+        # at exactly -depth -- the emitter has physically moved.  The analytic
+        # projection below returns a slope of -1 in that case, which is right;
+        # the special case overrode it with 0 and mis-centred the label search
+        # by the full sample depth.
+        if mode == "analytic":
             self.slope, self.offset = self._analytic_terms()
             self.depths = np.array([0.0, max(depth_max, 1e-3)])
             self.shifts = self.offset + self.slope * self.depths

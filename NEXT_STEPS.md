@@ -3,6 +3,30 @@
 The dataset is generated and validated; **no model has been trained at scale
 yet**. Everything below is a single command.
 
+## Generating for your own instrument
+
+This is the path for a dataset matched to one microscope rather than to a
+randomised population of them.
+
+```bash
+cp configs/lab_template.yaml configs/mylab.yaml     # then fill in the numbers
+python3 scripts/show_system.py configs/mylab.yaml   # check before generating
+python3 scripts/make_dataset.py --out data/mylab --scenes 1000 \
+    --system-config configs/mylab.yaml --slab-thickness LOW HIGH --workers 6
+```
+
+`show_system.py` prints the one number most worth reading first: the sample
+thickness above which the focal shift spreads best focus over more than two
+depths of field, so focus is no longer well defined and the label gates will
+reject the scene. On the template 60x/1.30 system that is **0.84 µm**. Generating
+with the default 0.2–8 µm slab range left 50% of scenes ambiguous; passing
+`--slab-thickness 0.1 0.84` took the usable fraction from 50% to 70%.
+
+`--system-config` holds the optics fixed and keeps randomising what actually
+varies session to session (aberrations, photon budget, illumination field, stage
+error). Add `--jitter-optics` only if the model must generalise across
+instruments.
+
 ## State
 
 | item | status |
@@ -13,6 +37,8 @@ yet**. Everything below is a single command.
 | three models + multi-task head + losses | built; `image` passes a 64-sample overfit test at 0.30 DoF |
 | search policies + classical baselines | built, compared against an oracle estimator |
 | dataset | **generated: 11,000 records / 1000 scenes, 237 MB in `data/train`** |
+| tests + CI | 141 tests, 20 s, no GPU; three CI jobs including an end-to-end smoke run |
+| instrument config | `configs/lab_template.yaml` + `scripts/show_system.py` |
 | **training at scale** | **not done** |
 | **sim-to-real validation** | **not started — no real microscope data has been through this** |
 

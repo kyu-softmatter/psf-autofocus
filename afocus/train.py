@@ -354,9 +354,29 @@ def train(
                                            require_features=need)
     dl = lambda d, sh: DataLoader(d, batch_size=cfg.batch_size, shuffle=sh,
                                   num_workers=cfg.num_workers, drop_last=sh)
-    train_dl = dl(ds(tr_idx, cfg.augment, False), True)
-    val_dl = dl(ds(va_idx, None, False), False)
-    test_dl = dl(ds(te_idx, None, False), False)
+    train_ds, val_ds, test_ds = (ds(tr_idx, cfg.augment, False),
+                                 ds(va_idx, None, False),
+                                 ds(te_idx, None, False))
+    empty = [n for n, d in (("train", train_ds), ("val", val_ds), ("test", test_ds))
+             if len(d) == 0]
+    if empty:
+        extra = ("  The physics features do not exist for every frame -- an edge "
+                 "profile needs a resolvable boundary and encircled energy a "
+                 "detectable spot -- and this dataset has none in the affected "
+                 "split. Either generate a larger field of view, or pass "
+                 "require_features=False (scripts/train.py --all-frames) to "
+                 "train on frames whose feature block is all zeros."
+                 if need else
+                 "  Check that the dataset is large enough to split, and that it "
+                 "contains records for the requested geometry families.")
+        raise ValueError(
+            f"model kind {cfg.kind!r}: the {', '.join(empty)} split is empty "
+            f"after filtering ({len(train_ds)}/{len(val_ds)}/{len(test_ds)} "
+            f"train/val/test frames from {a and len(a)} records).{extra}")
+
+    train_dl = dl(train_ds, True)
+    val_dl = dl(val_ds, False)
+    test_dl = dl(test_ds, False)
 
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     steps = max(len(train_dl) * cfg.epochs, 1)
