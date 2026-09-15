@@ -1,0 +1,32 @@
+# Generated data. Regenerable in ~40 min on 6 cores:
+#   python3 scripts/make_dataset.py --out data/train --scenes 1000 --workers 6
+# Deliberately not tracked: 225 MB of npz shards that carry no information the
+# generator and its seed do not already determine.
+# `data/` alone would ignore the directory itself, and git cannot un-ignore a
+# path inside an ignored directory -- so the negation below would never apply.
+data/*
+!data/.gitkeep
+
+# Training artefacts
+runs/
+*.pt
+*.pth
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Logs, except the generation log kept as a provenance record
+outputs/*.log
+!outputs/gen_train.log

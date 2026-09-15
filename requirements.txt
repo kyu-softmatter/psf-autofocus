@@ -1,0 +1,14 @@
+# Core simulation. numpy >= 2.0 gains np.trapezoid; the code falls back to
+# np.trapz below that, so 1.24 is the real floor.
+numpy>=1.24
+scipy>=1.10          # scipy.fft (next_fast_len, threaded transforms), ndimage, special
+
+# Models. Apple-silicon MPS, CUDA and CPU all work; the device is auto-detected.
+torch>=2.0
+torchvision>=0.15    # ResNet backbones for the image branch
+
+# Boundary detection for the edge-profile features
+scikit-image>=0.20   # skimage.measure.find_contours
+
+# Figures
+matplotlib>=3.6
