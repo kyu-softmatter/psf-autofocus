@@ -20,16 +20,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
-import torch
 
 from ..features import edge as E
 from ..optics.system import ImagingSystem
-from ..sim.dataset import DESCRIPTOR_NAMES, N_COND, N_DESCRIPTORS
-from .nets import DefocusBins, build_model
-from .preprocess import cond_from_system, normalise_image, resize
+
+if TYPE_CHECKING:            # pragma: no cover - typing only
+    import torch
 
 
 @dataclass
@@ -42,15 +41,33 @@ class EstimatorConfig:
 
 
 class ModelEstimator:
-    """Callable matching :class:`afocus.search.policies.DefocusEstimator`."""
+    """Callable matching :class:`afocus.search.policies.DefocusEstimator`.
+
+    torch is imported here rather than at module scope so that
+    :class:`OracleEstimator` -- and therefore the whole of
+    :mod:`afocus.search.policies`, including the classical z-scan baselines --
+    can be used on a machine with no deep-learning stack installed.  The
+    baselines are the thing a learned model has to beat, and needing a 2 GB
+    dependency to run them would be absurd.
+    """
 
     def __init__(
         self,
-        checkpoint: str | Path | Dict,
+        checkpoint: "str | Path | Dict",
         system: ImagingSystem,
-        device: Optional[torch.device] = None,
+        device: "Optional[torch.device]" = None,
         cfg: Optional[EstimatorConfig] = None,
     ) -> None:
+        import torch
+
+        from ..sim.dataset import DESCRIPTOR_NAMES, N_COND, N_DESCRIPTORS
+        from .nets import DefocusBins, build_model
+        from .preprocess import cond_from_system, normalise_image, resize
+
+        self._torch = torch
+        self._helpers = (DESCRIPTOR_NAMES, N_COND, N_DESCRIPTORS,
+                         cond_from_system, normalise_image, resize)
+
         ck = torch.load(checkpoint, map_location="cpu", weights_only=False) \
             if not isinstance(checkpoint, dict) else checkpoint
         self.cfg = cfg or EstimatorConfig()
@@ -74,9 +91,16 @@ class ModelEstimator:
         self.calls = 0
 
     # -- single frame ------------------------------------------------------
-    @torch.no_grad()
     def predict_one(self, frame: np.ndarray) -> Dict[str, float]:
         """Defocus for one frame, in micrometres, plus diagnostics."""
+        torch = self._torch
+        with torch.no_grad():
+            return self._predict_one(frame)
+
+    def _predict_one(self, frame: np.ndarray) -> Dict[str, float]:
+        torch = self._torch
+        (DESCRIPTOR_NAMES, N_COND, N_DESCRIPTORS,
+         cond_from_system, normalise_image, resize) = self._helpers
         sysm = self.system
         dof = sysm.depth_of_field
         img_n, _, scale = normalise_image(frame)

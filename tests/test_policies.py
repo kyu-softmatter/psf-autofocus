@@ -114,3 +114,54 @@ def test_stage_backlash_appears_only_on_reversal():
 def test_policy_registry_is_consistent():
     assert set(P.METRIC_ONLY) | set(P.MODEL_BASED) == set(P.POLICIES)
     assert not set(P.METRIC_ONLY) & set(P.MODEL_BASED)
+
+
+def test_policies_and_oracle_work_without_torch():
+    """The classical baselines are what a learned model has to beat, so needing
+    a 2 GB deep-learning dependency to run them would be absurd.  Checked in a
+    subprocess with torch actively blocked, because an import that already
+    succeeded in this process cannot be un-done."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    code = r'''
+import builtins, sys
+real = builtins.__import__
+def blocked(name, *a, **k):
+    if name == "torch" or name.startswith("torch."):
+        raise ModuleNotFoundError("No module named %r" % name)
+    return real(name, *a, **k)
+builtins.__import__ = blocked
+
+import numpy as np
+from afocus.search import policies as P
+from afocus.models.estimator import OracleEstimator
+
+def acquire(z):
+    sigma = 1.5 + 6.0 * abs(z - 1.7)
+    n = 48
+    y, x = np.mgrid[0:n, 0:n] - n / 2
+    return 1000.0 * np.exp(-(x ** 2 + y ** 2) / (2 * sigma ** 2)) + 5.0
+
+r = P.CoarseToFine(span=8.0, n_coarse=9, n_fine=7).run(acquire, start=6.0)
+assert abs(r.error(1.7)) < 0.5, r.error(1.7)
+
+est = OracleEstimator(1.7, sigma_um=0.2, rng=np.random.default_rng(0))
+r2 = P.Iterative(est, max_iters=4).run(acquire, start=6.0)
+assert abs(r2.error(1.7)) < 0.5, r2.error(1.7)
+
+from afocus.models.estimator import ModelEstimator
+try:
+    ModelEstimator({}, None)
+except ModuleNotFoundError:
+    pass
+else:
+    raise AssertionError("ModelEstimator should need torch")
+print("OK")
+'''
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, cwd=root)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "OK" in proc.stdout
