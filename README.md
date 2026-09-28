@@ -10,6 +10,8 @@ and the classical z-scan baselines the learned model has to beat.
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
+> **See also:** [soft-matter-agents](https://github.com/kyu-softmatter/soft-matter-agents), a four-agent system (microscope, simulation, librarian, bridge) that designs and runs soft-matter experiments.
+
 > **Status.** The forward model, labels and features are built and validated
 > against theory (numbers throughout). An 11,000-frame dataset generates in
 > ~40 min. **No model has been trained at scale yet, and no real microscope data
